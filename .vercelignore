@@ -1,0 +1,13 @@
+# local / heavy / unnecessary for deploy
+node_modules
+.next
+.git
+past-tense.db
+*.db
+
+# huge assets that blow CLI upload (keep only what the UI needs)
+public/images/John Hizaki.svg
+public/images/John Hizaki.png
+public/images/AJXRHAIDER.png
+app/icon.svg
+app/icon.png
