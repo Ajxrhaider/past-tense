@@ -1,21 +1,16 @@
-import { insertMessage, getOrCreateSession } from "@/lib/db";
-
 export async function POST(req: Request) {
   try {
-    const { messages, systemPrompt, sessionId, personaId } = await req.json();
+    const { messages, systemPrompt } = await req.json();
 
-    // 1. Persist the user's incoming message
-    if (sessionId && personaId) {
-      getOrCreateSession(sessionId, personaId);
-      const lastUserMsg = messages[messages.length - 1];
-      if (lastUserMsg?.role === "user") {
-        insertMessage(sessionId, "user", lastUserMsg.content);
-      }
+    if (!process.env.GROQ_API_KEY) {
+      return new Response(JSON.stringify({ error: "GROQ_API_KEY is not configured" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
     }
 
-    // 2. Fetch live models to guarantee availability
     const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}` }
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     });
 
     if (!modelsRes.ok) {
@@ -23,46 +18,49 @@ export async function POST(req: Request) {
     }
 
     const modelsData = await modelsRes.json();
-    const availableModels = modelsData.data.map((m: any) => m.id);
-    
-    // Filter out third-party/specialized models
-    const safeModels = availableModels.filter((m: string) => 
-      !m.includes("/") && 
-      !m.includes("guard") && 
-      !m.includes("whisper") && 
-      !m.includes("vision") && 
-      !m.includes("embed")
-    );
-    
-    // Prioritize Llama models for the fallback array
-    const llamaModels = safeModels.filter((m: string) => m.includes("llama"));
-    const fallbackModels = llamaModels.length > 0 ? llamaModels.slice(0, 3) : safeModels.slice(0, 3);
+    const availableModels = modelsData.data.map((m: { id: string }) => m.id);
 
-    let response;
+    const safeModels = availableModels.filter(
+      (m: string) =>
+        !m.includes("/") &&
+        !m.includes("guard") &&
+        !m.includes("whisper") &&
+        !m.includes("vision") &&
+        !m.includes("embed")
+    );
+
+    const llamaModels = safeModels.filter((m: string) => m.includes("llama"));
+    const fallbackModels =
+      llamaModels.length > 0 ? llamaModels.slice(0, 3) : safeModels.slice(0, 3);
+
+    if (fallbackModels.length === 0) {
+      return new Response(JSON.stringify({ error: "No suitable Groq models available" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    let response: Response | undefined;
     let fetchAttempt = 0;
 
-    // 3. Auto-fallback loop: Try up to 3 different models silently if one fails
     while (fetchAttempt < fallbackModels.length) {
       response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${process.env.GROQ_API_KEY}`,
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
           model: fallbackModels[fetchAttempt],
-          messages: [
-            { role: "system", content: systemPrompt },
-            ...messages
-          ],
+          messages: [{ role: "system", content: systemPrompt }, ...messages],
           max_tokens: 512,
           temperature: 0.7,
           stream: true,
         }),
       });
 
-      if (response.ok) break; 
-      
+      if (response.ok) break;
+
       console.warn(`Model ${fallbackModels[fetchAttempt]} failed, attempting fallback...`);
       fetchAttempt++;
     }
@@ -76,12 +74,10 @@ export async function POST(req: Request) {
       });
     }
 
-    let fullAssistantResponse = "";
-
-    // 4. Stream and persist the assistant's response
+    // Stream only the text deltas to the client (same format your UI already expects)
     const stream = new ReadableStream({
       async start(controller) {
-        const reader = response.body?.getReader();
+        const reader = response!.body?.getReader();
         if (!reader) {
           controller.close();
           return;
@@ -102,31 +98,27 @@ export async function POST(req: Request) {
             if (line.startsWith("data: ") && line !== "data: [DONE]") {
               try {
                 const data = JSON.parse(line.slice(6));
-                const content = data.choices[0]?.delta?.content || "";
+                const content = data.choices?.[0]?.delta?.content || "";
                 if (content) {
-                  fullAssistantResponse += content;
                   controller.enqueue(new TextEncoder().encode(content));
                 }
-              } catch (e) {
-                // Ignore partial JSON chunks
+              } catch {
+                // ignore partial JSON
               }
             }
           }
         }
 
-        if (sessionId && fullAssistantResponse) {
-          insertMessage(sessionId, "assistant", fullAssistantResponse);
-        }
         controller.close();
-      }
+      },
     });
 
     return new Response(stream, {
       headers: { "Content-Type": "text/plain; charset=utf-8" },
     });
-
-  } catch (error: any) {
-    console.error("API Route Execution Error:", error.message || error);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("API Route Execution Error:", message);
     return new Response(JSON.stringify({ error: "Internal Server Error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
