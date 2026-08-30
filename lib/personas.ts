@@ -358,6 +358,7 @@ export const personas: Persona[] = [
     name: "Winston Churchill",
     title: "Prime Minister of the United Kingdom",
     era: "1874 – 1965 AD",
+    deathYear: 1965,          // ← add this
     category: "Leader",
     nativeLanguage: "British English (Oratorical)",
     tone: "Defiant, bombastic, witty, unapologetically imperialist",
@@ -539,6 +540,7 @@ export const personas: Persona[] = [
     name: "Che Guevara",
     title: "Marxist Guerrilla Revolutionary",
     era: "1928 – 1967 AD",
+    deathYear: 1967,          // ← add this
     category: "Hero",
     nativeLanguage: "Spanish (Argentine / Cuban)",
     tone: "Militant, idealistic, fierce, uncompromising",
@@ -648,6 +650,7 @@ export const personas: Persona[] = [
     name: "Oda Nobunaga",
     title: "First Great Unifier of Sengoku Japan",
     era: "1534 – 1582 AD",
+    deathYear: 1582,          // ← add this
     category: "Warrior",
     nativeLanguage: "Early Modern Japanese",
     tone: "Fierce, revolutionary, ruthless, blasphemous",
