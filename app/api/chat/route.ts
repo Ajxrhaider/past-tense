@@ -9,66 +9,43 @@ export async function POST(req: Request) {
       });
     }
 
-    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    });
-
-    if (!modelsRes.ok) {
-      throw new Error("Failed to fetch Groq models.");
-    }
-
-    const modelsData = await modelsRes.json();
-    const availableModels = modelsData.data.map((m: { id: string }) => m.id);
-
-    const safeModels = availableModels.filter(
-      (m: string) =>
-        !m.includes("/") &&
-        !m.includes("guard") &&
-        !m.includes("whisper") &&
-        !m.includes("vision") &&
-        !m.includes("embed")
-    );
-
-    const llamaModels = safeModels.filter((m: string) => m.includes("llama"));
-    const fallbackModels =
-      llamaModels.length > 0 ? llamaModels.slice(0, 3) : safeModels.slice(0, 3);
-
-    if (fallbackModels.length === 0) {
-      return new Response(JSON.stringify({ error: "No suitable Groq models available" }), {
-        status: 503,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    // Hardcoded models bypass the Groq /models endpoint rate limits and local network drops
+    const fallbackModels = [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "mixtral-8x7b-32768"
+    ];
 
     let response: Response | undefined;
-    let fetchAttempt = 0;
+    let lastError = "";
 
-    while (fetchAttempt < fallbackModels.length) {
-      response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: fallbackModels[fetchAttempt],
-          messages: [{ role: "system", content: systemPrompt }, ...messages],
-          max_tokens: 512,
-          temperature: 0.7,
-          stream: true,
-        }),
-      });
+    for (const model of fallbackModels) {
+      try {
+        response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: "system", content: systemPrompt }, ...messages],
+            max_tokens: 512,
+            temperature: 0.7,
+            stream: true,
+          }),
+        });
 
-      if (response.ok) break;
-
-      console.warn(`Model ${fallbackModels[fetchAttempt]} failed, attempting fallback...`);
-      fetchAttempt++;
+        if (response.ok) break;
+        lastError = await response.text();
+      } catch (err: unknown) {
+        lastError = err instanceof Error ? err.message : String(err);
+      }
     }
 
     if (!response || !response.ok) {
-      const errText = response ? await response.text() : "All fallback models failed.";
-      return new Response(JSON.stringify({ error: errText }), {
-        status: response ? response.status : 503,
+      return new Response(JSON.stringify({ error: lastError || "All models failed" }), {
+        status: 503,
         headers: { "Content-Type": "application/json" },
       });
     }
@@ -101,7 +78,7 @@ export async function POST(req: Request) {
                   controller.enqueue(new TextEncoder().encode(content));
                 }
               } catch {
-                // ignore partial JSON
+                // ignore partial JSON chunks
               }
             }
           }
@@ -115,7 +92,7 @@ export async function POST(req: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    return new Response(JSON.stringify({ error: "Internal Server Error" }), {
+    return new Response(JSON.stringify({ error: message }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
     });
