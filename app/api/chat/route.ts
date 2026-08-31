@@ -67,14 +67,12 @@ export async function POST(req: Request) {
 
     if (!response || !response.ok) {
       const errText = response ? await response.text() : "All fallback models failed.";
-      console.error("Groq API Error Response:", errText);
       return new Response(JSON.stringify({ error: errText }), {
         status: response ? response.status : 503,
         headers: { "Content-Type": "application/json" },
       });
     }
 
-    // Stream only the text deltas to the client (same format your UI already expects)
     const stream = new ReadableStream({
       async start(controller) {
         const reader = response!.body?.getReader();
@@ -108,7 +106,6 @@ export async function POST(req: Request) {
             }
           }
         }
-
         controller.close();
       },
     });
@@ -118,7 +115,6 @@ export async function POST(req: Request) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
-    console.error("API Route Execution Error:", message);
     return new Response(JSON.stringify({ error: "Internal Server Error" }), {
       status: 500,
       headers: { "Content-Type": "application/json" },
