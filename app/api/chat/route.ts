@@ -9,12 +9,36 @@ export async function POST(req: Request) {
       });
     }
 
-    // Hardcoded models bypass the Groq /models endpoint rate limits and local network drops
-    const fallbackModels = [
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant",
-      "mixtral-8x7b-32768"
-    ];
+    // Dynamically fetch models authorized for your specific API key
+    const modelsRes = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
+    });
+
+    if (!modelsRes.ok) {
+      const errText = await modelsRes.text();
+      throw new Error(`Failed to fetch available Groq models: ${errText}`);
+    }
+
+    const modelsData = await modelsRes.json();
+    const availableModels = modelsData.data.map((m: { id: string }) => m.id);
+
+    // Filter out audio/vision/guard models
+    const safeModels = availableModels.filter(
+      (m: string) =>
+        !m.includes("/") &&
+        !m.includes("guard") &&
+        !m.includes("whisper") &&
+        !m.includes("vision") &&
+        !m.includes("embed")
+    );
+
+    // Prioritize Llama models, slice to top 3 to prevent infinite loops
+    const llamaModels = safeModels.filter((m: string) => m.toLowerCase().includes("llama"));
+    const fallbackModels = llamaModels.length > 0 ? llamaModels.slice(0, 3) : safeModels.slice(0, 3);
+
+    if (fallbackModels.length === 0) {
+      throw new Error("No compatible text models found for this API key.");
+    }
 
     let response: Response | undefined;
     let lastError = "";

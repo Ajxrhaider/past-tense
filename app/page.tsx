@@ -92,7 +92,10 @@ export default function Home() {
         }),
       });
 
-      if (!response.ok) throw new Error("Network response was not ok");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server returned HTTP ${response.status}`);
+      }
       if (!response.body) throw new Error("No response body");
 
       const reader = response.body.getReader();
@@ -119,7 +122,10 @@ export default function Home() {
         }
       }
     } catch (error) {
-      console.error("Temporal synchronization failed:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error("Temporal synchronization failed:", msg);
+      // Directly surfaces the error in the chat interface
+      setMessages((prev) => [...prev, { role: "assistant", content: `**SYSTEM ERROR:** ${msg}` }]);
     } finally {
       setIsLoading(false);
       setIsReceivingStream(false);
